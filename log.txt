@@ -8,5 +8,6 @@ Familiarize myself with Docker
 Friday 06-02-2015
 10.00 - 11.00
 12.00 - 16.00
-
 created git repo
+added short file for extracting MFCCs for a wav file
+Experimented a bit with the Penn Phonetics Lab Forced Aligner, didn't seem to work yet
