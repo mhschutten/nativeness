@@ -1,50 +1,111 @@
-from ldc_wavlib.features import mfcc
-from scipy.io import wavfile
+from os import listdir
+from os.path import isfile, join
 from sys import argv
+
+from scipy.io import wavfile
 import numpy as np
-import struct 
-import praatTextGrid
 import math
+import struct 
+
+import praatTextGrid
+from sklearn import mixture
+from ldc_wavlib.features import mfcc
+from sklearn import svm
 
 class MFCCExtractor:
-    
-    #read the specified wav file
-    def readWav(self, location):
-        self.sr, self.wavData = wavfile.read(location)
 
-        print self.wavData
-        wavfile.write('tmp/original2.wav',self.sr,self.wavData)
+    def run(self):
+        allInputs = []
+        for speaker in self.__allSpeakers:
+            gmm = self.computeSpeakerProperties(self.__dataLocation + speaker)
+            speakerInput = np.concatenate((gmm.means_, gmm.covars_))
+            allInputs.append(speakerInput)
 
+        datasetSize = len(self.__nativelikenessScores)
+        boundary = int(0.9 * datasetSize)
         
-    #getMFCCs of current wav file
-    def getMFCCs(self):
-        mfccs = mfcc.get_mfcc(self.wavData, self.sr)
-
-        return mfccs 
+        regressionSolver = svm.SVR()
+        regressionSolver.fit(allInputs[0:boundary], self.__nativelikenessScores[0:boundary])
         
-    def getWordAlignment(self, location):
+        result = 0.0
+        for idx in range(boundary, datasetSize):
+            output = regressionSolver.predict(allInputs[idx])
+            
+            result += (output - self.__nativelikenessScores[idx]) * (output - self.__nativelikenessScores[idx])
+
+        result /= (datasetSize - boundary)
+
+        print result
+
+
+
+    #Extract the gmm info from the wav file for a given speaker
+    def computeSpeakerProperties(self, location):
+        #currently just for a single file at location
+        sr, wavData = self.readWav(location + ".wav") 
+
+        words = self.extractWords(wavData, location + ".TextGrid", sr)
+        mfccs = self.getMFCCs(words, sr)
+        gmm = self.getMixtureModel(mfccs)
+
+        return gmm
+        
+    #extract words from a given wav file w.r.t. provided TextGrid file
+    def extractWords(self, wavData, textGridFile, sr):
+
+        #read the TextGrid file
         textGrid = praatTextGrid.PraatTextGrid(0, 0)
-        arrTiers = textGrid.readFromFile(location)
+        arrTiers = textGrid.readFromFile(textGridFile)
         
-        self.alignments = arrTiers[1]
-        return arrTiers[1]
-        
+        #Extract the alignments
+        alignments = arrTiers[1]
 
+        words = []
+        for i in range (alignments.getSize()):
+            word = alignments.get(i)
 
-    def extractWords(self):
-        self.words = []
-
-        for i in range (self.alignments.getSize()):
-            word = self.alignments.get(i)
-
+            #exclude non-words
             if self.__isNonWord(word[2]):
                 continue
+            
+            #get the boundaries of the word
+            startIdx = int(word[0] * sr)
+            endIdx = int(word[1] * sr)
 
-            startIdx = int(word[0] * self.sr)
-            endIdx = int(word[1] * self.sr)
+            #add the word to thelist of words
+            words.append(wavData[startIdx : endIdx])
     
-            self.words.append(self.wavData[startIdx : endIdx])
-                    
+        return words
+    
+
+    #read the specified wav file
+    def readWav(self, location):
+        return wavfile.read(location)
+
+        
+    #getMFCCs of the current set of words with a given sampling rate
+    def getMFCCs(self, words, sr):
+        mfccs = []
+        for word in words:
+            mfccs.append(mfcc.get_mfcc(word, sr))
+    
+        return mfccs
+        
+        
+    #create the GMM for a given set of MFCCs    
+    def getMixtureModel(self, mfccs):
+        gmm = mixture.GMM(n_components = 13)
+        
+        for mfcc in mfccs:
+            tmpmfcc = np.reshape(mfcc[0], len(mfcc[0]) * 13)
+            gmm.fit(tmpmfcc)
+            
+            gmm.means_ = np.reshape(gmm.means_, len(gmm.means_))
+            gmm.covars_ = np.reshape(gmm.covars_, len(gmm.covars_))
+        
+        return gmm
+
+
     #check whether something is an actual word
     def __isNonWord(self, word):
         if word == 'sp' or word == 'sil':
@@ -52,61 +113,35 @@ class MFCCExtractor:
         
         return False
 
-    #initialization
-    def __init__(self):
-        self.sr = 0 #sampling rate
-        self.wavData = [] #current wav file
-        self.alignments = [] #alignments per word for the current wav file
-        self.words = [] #list of sound signals for all words
-
-        #NOT IN USE YET
-        self.location = "" #location of datafolder
-
-if __name__ == "__main__":
-    extractor = MFCCExtractor()
-    tier = extractor.getWordAlignment(argv[1] + ".TextGrid")
-    extractor.readWav(argv[1] + ".wav") 
-
-    extractor.extractWords()
-
-    filename = "tmp/original1.wav"
-    wavfile.write(filename, extractor.sr, extractor.wavData)
-
-    for i in range(len(extractor.words)):
-        filename = "tmp/speaker1word" + str(i)
-        print extractor.words[i]
-        print extractor.sr, len(extractor.words[i])
+    def __parseDatafile(self, datafile):
+        f = open(datafile, 'r')
         
-        wavfile.write(filename, extractor.sr, np.array(extractor.words[i], dtype = float))
+        #skip the first line
+        f.readline() 
 
-    """
-    print tier  
-    for i in range(tier.getSize()):
-#        if tier.getLabel(i) == 'sounding':
-        interval = tier.get(i)
-        print "\t", interval
+        speakers = []
+        nativelikenessScores = []
+        for line in f:
+            columns = line.split('\t')
+            print columns
+            speakers.append(columns[0])
+            nativelikenessScores.append(float(columns[1]))
 
-    print extractor.getMFCCs()
-    """    
-    
-    tier = extractor.getWordAlignment(argv[2] + ".TextGrid")
-    extractor.readWav(argv[2] + ".wav") 
+        return speakers, nativelikenessScores
 
-    extractor.extractWords()
+        
+    #initialization
+    def __init__(self, datafile, dataLocation):
+        self.__allSpeakers, self.__nativelikenessScores = self.__parseDatafile(datafile)
+        if (dataLocation[-1] != '/'):
+            dataLocation += '/'
+        self.__dataLocation = dataLocation
 
-    filename = "tmp/original2.wav"
-    wavfile.write(filename, extractor.sr, extractor.wavData)
+        
+if __name__ == "__main__":
+    dataFileLocation = "../data/test/speakers.txt"
+    wavDataFolder = "../data/test/"
 
-    for i in range(len(extractor.words)):
-        filename = "tmp/speaker2word" + str(i)
-        wavfile.write(filename, extractor.sr, extractor.words[i])
+    extractor = MFCCExtractor(dataFileLocation, wavDataFolder)
+    extractor.run()
 
-    """
-    print tier  
-    for i in range(tier.getSize()):
-#        if tier.getLabel(i) == 'sounding':
-        interval = tier.get(i)
-        print "\t", interval
-
-    print extractor.getMFCCs()
-    """
