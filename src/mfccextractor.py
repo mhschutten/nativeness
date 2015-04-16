@@ -123,9 +123,11 @@ class MFCCExtractor:
         nativelikenessScores = []
         for line in f:
             columns = line.split('\t')
-            print columns
-            speakers.append(columns[0])
-            nativelikenessScores.append(float(columns[1]))
+            if (columns[1] != "NA"):
+                speakers.append(columns[0])
+                nativelikenessScores.append(float(columns[1]))
+
+        print "Number of speakers: ", len(speakers)
 
         return speakers, nativelikenessScores
 
@@ -136,11 +138,12 @@ class MFCCExtractor:
         if (dataLocation[-1] != '/'):
             dataLocation += '/'
         self.__dataLocation = dataLocation
+        
 
         
 if __name__ == "__main__":
-    dataFileLocation = "../data/test/speakers.txt"
-    wavDataFolder = "../data/test/"
+    dataFileLocation = "../speakers.txt"
+    wavDataFolder = "../aligned_data/"
 
     extractor = MFCCExtractor(dataFileLocation, wavDataFolder)
     extractor.run()
