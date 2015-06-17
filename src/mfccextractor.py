@@ -123,9 +123,9 @@ class MFCCExtractor:
         nativelikenessScores = []
         for line in f:
             columns = line.split('\t')
-            if (columns[1] != "NA"):
-                speakers.append(columns[0])
-                nativelikenessScores.append(float(columns[1]))
+#            if (columns[2] != "NA"):
+            speakers.append(columns[0])
+            nativelikenessScores.append(float(columns[1]))
 
         print "Number of speakers: ", len(speakers)
 
